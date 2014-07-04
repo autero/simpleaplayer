@@ -29,7 +29,7 @@ var krpanoplugin = function() {
 
 		// Регистрация атрибутов
 		plugin.registerattribute("allowMultuSounds", false, set_allowMultuSounds, get_allowMultuSounds);
-		plugin.registerattribute("volume",           80,    set_volume,           get_volume);
+		plugin.registerattribute("volume",           50,    set_volume,           get_volume);
 
 		// Регистрация методов
 		/* !Важно: регистрируем функции не в плгине (plugin),
@@ -45,7 +45,7 @@ var krpanoplugin = function() {
 
 		local.initialization();
 		// Для показа консоли krpano (только для отладки)
-		krpano.trace(3, 'Дуболь № 32');
+		krpano.trace(3, 'Дуболь № 33');
 
 		/*
 		 // add plugin graphic content (optionally)
@@ -80,8 +80,9 @@ var krpanoplugin = function() {
 		plugin = null;
 		krpano = null;
 
+		stopAllSounds();
 		_audioContext = null;
-		_volume = 80;
+		_volume = 50;
 		_allowMultuSounds = false;
 	}
 	// hittest - test for clicks on the plugin (optionally)
@@ -144,8 +145,8 @@ var krpanoplugin = function() {
 	// Данные относящиеся к воспроизведению звука
 	// Аудио контекст
 	var _audioContext = null;
-	// Уровень громкости [0, 100]
-	var _volume = 80;
+	// Уровень громкости [0, 100]%
+	var _volume = 50;
 	// Разрешать воспроизведение нескольких звуков однвременно.
 	var _allowMultuSounds = true;
 	// Массив звуков
@@ -182,11 +183,22 @@ var krpanoplugin = function() {
 	}
 
 	function set_volume(newvalue) {
-		//       krpano.trace(1,"attr4 will be changed from " + attr4 + " to " + newvalue);
-		_volume = newvalue;
+		krpano.trace(0, "volume will be changed from " + _volume + " to " + newvalue);
+
+		_volume = parseFloat(newvalue);
+		if (_volume < 0) _volume = 0;
+		if (_volume > 100) _volume = 100.0;
+
+		for (var iter in _sounds) {
+			if (_sounds[iter].gain) {
+				_sounds[iter].gain.gain.value = _volume / 100.0;
+			}
+		}
 	}
 
 	function get_volume() {
+		krpano.trace(0, "get_volume");
+
 		return _volume;
 	}
 	
@@ -221,7 +233,12 @@ var krpanoplugin = function() {
 	  		if (_sounds[id].buffer) {
 	  			try {
 					var source = _audioContext.createBufferSource();
-					source.connect(_audioContext.destination);
+					if (!_sounds[id].gain) {
+						_sounds[id].gain = _audioContext.createGain();
+	  					_sounds[id].gain.gain.value = _volume / 100.0;
+	  					_sounds[id].gain.connect(_audioContext.destination);
+	  				}
+					source.connect(_sounds[id].gain);
 					source.buffer = _sounds[id].buffer;
 					_sounds[id].source = source;
 					_sounds[id].source.start(0);
@@ -252,6 +269,7 @@ var krpanoplugin = function() {
 			_sounds[id].play = false;
 			if (_sounds[id].source) {
 				_sounds[id].source.stop(0);
+				_sounds[id].source.disconnect();
 				_sounds[id].source = null;
 			}
 		} catch(e) { krpano.trace(0, e.message); }
