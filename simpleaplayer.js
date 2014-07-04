@@ -44,8 +44,8 @@ var krpanoplugin = function() {
 		krpano.trace(1, "hello from plugin[" + plugin.name + "]");
 
 		local.initialization();
-
-		krpano.trace(3, 'DEBUG12');
+		// Для показа консоли krpano (только для отладки)
+		krpano.trace(3, 'Дуболь № 32');
 
 		/*
 		 // add plugin graphic content (optionally)
@@ -285,8 +285,6 @@ var krpanoplugin = function() {
 			// Создаем объект
 			_sounds[id] = {};
 			
-krpano.trace(0, "Дуболь № 30");
-			
         	if (!_audioBufferInitHack) {
         		// Это важно для iOS - для того что бы все работало необходимо 
         		// чтобы в интерфейсном потоке был один раз был создан BufferSource,
@@ -311,15 +309,16 @@ krpano.trace(0, "Дуболь № 30");
 	      				} catch (e) { krpano.trace(3, 'Error: ' + e); }
 	    			},
 	    			function(e) {
-	    				delete sounds[id];
+	    				delete _sounds[id];
 	      				krpano.trace(3, 'Error decoding file: ' + e);
 	    			}
 	    		);
 	  		};
 	  		xhr.onerror = function(e) {
-				delete sounds[id];
+				delete _sounds[id];
 				krpano.trace(3, 'Error ' + e.target.status + ' occurred while receiving the audio file - ' + url + '.');
 	  		};
+
 	  		// Отправка запроса
 	  		xhr.send();
 		}
