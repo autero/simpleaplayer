@@ -42,12 +42,19 @@ var krpanoplugin = function() {
 		krpano.simpleaplayer = pluginobject;
 
 		// say hello
-		krpano.trace(1, "hello from plugin[" + plugin.name + "]");
+		krpano.trace(3, "4444 hello from plugin[" + plugin.name + "]");
 
 		local.initialization();
 
 		// Регистрация атрибутов
+		/*
+		 * Разрешить/запретить true/false воспроизведение нескольких звуков одновременно.
+		 * Не реализовано в HTML5Audio (только один звук).
+		 */
 		plugin.registerattribute("allowMultuSounds", false, set_allowMultuSounds, get_allowMultuSounds);
+		/*
+		 * Уровень громкости [0, 100].
+		 */
 		plugin.registerattribute("volume",           80,    set_volume,           get_volume);
 
 		// Регистрация методов
@@ -58,8 +65,6 @@ var krpanoplugin = function() {
 		krpanointerface.stopallsounds = stopAllSounds;
 		krpanointerface.stopsound     = stopSound;
 		krpanointerface.preloadsound  = preloadSound;
-
-		krpano.trace(3, 'Дуболь №36');
 
 		/*
 		 // add plugin graphic content (optionally)
@@ -122,6 +127,11 @@ var krpanoplugin = function() {
 
 		// Определяем какие звуковые форматы воспроизводит браузер
 		var audio = document.createElement("audio");
+		if (!audio) {
+			krpano.trace(3, "Браузер не поддерживает воспроизведение звука");
+			return;
+		}
+
 		var result = audio.canPlayType("audio/mpeg");
 		if (result.match(/maybe|probably/i))
 			_extension.push('mp3', 'mp2', 'mpa'); 
@@ -138,14 +148,112 @@ var krpanoplugin = function() {
 		if (result.match(/maybe|probably/i))
 			_extension.push('wav');
 
-		audio = null;
 		krpano.trace(1, "Список поддерживаемых форматов: " + _extension);
 
 		// Инициализация звукового движка
 		try {
 			window.AudioContext = window.AudioContext || window.webkitAudioContext;
 			var audioContext = new AudioContext();
-			_audioImpl = new audioAPIImpl(audioContext, 80, false)
+			_audioImpl = new audioAPIImpl(audioContext, 80, false);
+			audio = null;
+		} catch(e) {
+//			krpano.trace(2, e.message);
+		}
+
+		if (!_audioImpl)
+			_audioImpl = new audioHTML5(audio, 80, false);
+	}
+
+	/*  
+	 * Смикшировать/сгенерировать идентификатор (для однозначного определения звука)
+	 */
+	function makeId(id) {
+		id = String(id).toLowerCase();
+		if ("auto" == id || "null" == id || "" == id)
+			id = "autoId_" + krpano.timertick + "_" + Math.ceil(1E3 * krpano.random);
+
+		return id;
+	}
+
+	function set_allowMultuSounds(allowMultuSounds) {
+		try {
+			_audioImpl ?
+				_audioImpl.set_allowMultuSounds(allowMultuSounds) :
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
+		}		
+	}
+
+	function get_allowMultuSounds() {
+		try {
+			return _audioImpl ?
+				_audioImpl.get_allowMultuSounds() :
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
+		}
+	}
+
+	function set_volume(volume) {
+		try {
+			_audioImpl ?
+				_audioImpl.set_volume(volume) :
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
+		}
+	}
+
+	function get_volume() {
+		try {
+			return _audioImpl ?
+				_audioImpl.get_volume() :
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
+		}
+	}
+
+	function playSound(id, src) {
+		try {
+			if (_audioImpl)
+				return _audioImpl.playSound(id, src)
+			else
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
+		}
+	}
+
+	function stopAllSounds() {
+		try {
+			if (_audioImpl)
+				_audioImpl.stopAllSounds()
+			else
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
+		}
+	}
+
+	function stopSound(id) {
+		try {
+			if (_audioImpl)
+				_audioImpl.stopSound(id)
+			else
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
+		}
+	}
+
+	function preloadSound(id, src) {
+		try {
+			if (_audioImpl)
+				_audioImpl.preloadSound(id, src)
+			else
+				krpano.trace(2, "_audioImpl == null");
 		} catch(e) {
 			krpano.trace(2, e.message);
 		}
@@ -275,7 +383,7 @@ var krpanoplugin = function() {
 			if (!_sounds[id]) {
 				// Создаем объект
 				_sounds[id] = {};
-				
+
 	        	if (!_audioBufferInitHack) {
 	        		// Это важно для iOS - для того что бы все работало необходимо 
 	        		// чтобы в интерфейсном потоке был один раз был создан BufferSource,
@@ -284,7 +392,7 @@ var krpanoplugin = function() {
 	        		source = null;
 	        		_audioBufferInitHack = true;
 	        	}
-	
+
 				// делаем XMLHttpRequest (AJAX) на сервер
 		  		var xhr = new XMLHttpRequest();
 		  		xhr.open('GET', url, true);
@@ -338,103 +446,170 @@ var krpanoplugin = function() {
 		this.get_volume = function() {
 			return _volume;
 		}
-	}
+	} // конец реализации audioAPIImpl
 
-	// Функции для работы со свойствами
-	function set_allowMultuSounds(allowMultuSounds) {
-		try {
-			_audioImpl ?
-				_audioImpl.set_allowMultuSounds(allowMultuSounds) :
-				krpano.trace(2, "_audioImpl == null");
-		} catch(e) {
-			krpano.trace(2, e.message);
-		}		
-	}
-
-	function get_allowMultuSounds() {
-		try {
-			return _audioImpl ?
-				_audioImpl.get_allowMultuSounds() :
-				krpano.trace(2, "_audioImpl == null");
-		} catch(e) {
-			krpano.trace(2, e.message);
-		}
-	}
-
-	function set_volume(volume) {
-		try {
-			_audioImpl ?
-				_audioImpl.set_volume(volume) :
-				krpano.trace(2, "_audioImpl == null");
-		} catch(e) {
-			krpano.trace(2, e.message);
-		}
-	}
-
-	function get_volume() {
-		try {
-			return _audioImpl ?
-				_audioImpl.get_volume() :
-				krpano.trace(2, "_audioImpl == null");
-		} catch(e) {
-			krpano.trace(2, e.message);
-		}
-	}
-	
-	/*  
-	 * Смикшировать/сгенерировать идентификатор (для однозначного определения звука)
+	/*
+	 *  Реализация воспроизведения звука через audio API
+	 *  @param audioC           - HTML5 тег audio.
+	 *  @param volume           - уровень громкости (может изменяться в ходе рвботы).
+	 *  @param allowMultuSounds - разрешить воспроизведение нескольких звуков одновременно.
 	 */
-	function makeId(id) {
-		id = String(id).toLowerCase();
-		if ("auto" == id || "null" == id || "" == id)
-			id = "autoId_" + krpano.timertick + "_" + Math.ceil(1E3 * krpano.random);
+	var audioHTML5 = function(audio, volume, allowMultuSounds) {
+		// private:
+		// Данные относящиеся к воспроизведению звука
+		// Элемент HTML5 audio, через который все будет воспроизводиться
+		var _audio = audio;
+		// Уровень громкости [0, 100]
+		var _volume = volume;
+		// Разрешать воспроизведение нескольких звуков однвременно.
+		var _allowMultuSounds = allowMultuSounds;
+		// Массив звуков
+		/*
+		 * [id] // Уникальный идентификатор звука (задается/вычисляется)
+		 *      // Загрузка данных производиться при первом обращении playsound или preloadsound,
+		 * 		// при последующих обращениях загрузка производиться не будет,
+		 *      // а будет использованы те данные которые были получены при первом обращении
+		 *  {
+		 * 		url: {},       // Буферр декодированных и готовых к воспроизведению данных
+		 * 		play: true|false, // Флаг, используется для запуска на воспроизведение
+		 *                        // по окончанию асинхронной загрузки данных
+		 *  }
+		 */
+		var _sounds = [];
 
-		return id;
-	}
+		krpano.trace(1, 'Работает через тег audio HTML5');
 
-	////////////////////////////////////////////////////////////
-	//
-	function playSound(id, src) {
-		try {
-			if (_audioImpl)
-				return _audioImpl.playSound(id, src)
+		_audio.volume = _volume / 100.0;
+
+		this.playSound = function(id, src) {
+			krpano.trace(0, "playSound(" + id + ", " + src + ")");
+
+			id = makeId(id);
+
+			if (!_allowMultuSounds)
+				stopAllSounds();
 			else
-				krpano.trace(2, "_audioImpl == null");
-		} catch(e) {
-			krpano.trace(2, e.message);
-		}
-	}
+				stopSound(id);
 
-	function stopAllSounds() {
-		try {
-			if (_audioImpl)
-				_audioImpl.stopAllSounds()
-			else
-				krpano.trace(2, "_audioImpl == null");
-		} catch(e) {
-			krpano.trace(2, e.message);
-		}
-	}
+			if (!_sounds[id]) {
+				preloadSound(id, src);
+				if (_sounds[id])
+					_sounds[id].play = true;
+			} else {
 
-	function stopSound(id) {
-		try {
-			if (_audioImpl)
-				_audioImpl.stopSound(id)
-			else
-				krpano.trace(2, "_audioImpl == null");
-		} catch(e) {
-			krpano.trace(2, e.message);
-		}
-	}
+				// Хак для браузера Chrome на Android
+				// он не воспроизводит данные из blob
+				if (krpano.device.android &&  krpano.device.chrome) {
+					_audio.src = _sounds[id].url;
+					_audio.play();
+					return id;
+				}
 
-	function preloadSound(id, src) {
-		try {
-			if (_audioImpl)
-				_audioImpl.preloadSound(id, src)
-			else
-				krpano.trace(2, "_audioImpl == null");
-		} catch(e) {
-			krpano.trace(2, e.message);
+		  		if (_sounds[id].data) {
+		  			(window.URL || window.webkitURL).revokeObjectURL(_audio.src);
+		  			_audio.src = (window.URL || window.webkitURL).createObjectURL(_sounds[id].data);
+		  			_audio.play();
+		  		}
+		  		else {
+		  			_sounds[id].play = true;
+		  		}
+		  	}
+
+			return id;
 		}
-	}
+
+		this.stopAllSounds = function() {
+			krpano.trace(0, "stopAll");
+
+			for (var iter in _sounds)
+				stopSound(iter);
+		}
+
+		this.stopSound = function(id) {
+			krpano.trace(0, "stopSound(" + id + ")");
+
+			if (_sounds[id]) {
+				_sounds[id].play = false;
+				_audio.paused = true;
+			}
+		}
+
+		this.preloadSound = function(id, src) {
+			krpano.trace(0, "preloadSound(" + id + ", " + src + ")");
+
+			id = makeId(id);
+
+			src = src.split("|");
+
+			var url = "";
+			var index = _extension.length + 1;
+
+			for(var i = 0; i < src.length; i++) {
+				var ext = src[i].slice(src[i].lastIndexOf(".") + 1);
+				var ind = _extension.indexOf(ext);
+				if(ind >= 0 && ind < index) {
+					index = ind;
+					url = unescape(krpano.parsePath(src[i]));
+				}
+			}
+
+			if (url == "") {
+				krpano.trace(2, "Форматы не поддерживаеются: " + src);
+				return;
+			}
+
+			if (!_sounds[id]) {
+				// Создаем объект
+				_sounds[id] = {};
+
+				// Хак для браузера Chrome на Android
+				// он не воспроизводит данные из blob
+				if ( krpano.device.android &&  krpano.device.chrome) {
+					_sounds[id].url = url;
+					playSound(id);
+					return;
+				}
+
+				// делаем XMLHttpRequest (AJAX) на сервер
+		  		var xhr = new XMLHttpRequest();
+		  		xhr.open('GET', url, true);
+		  		xhr.responseType = 'blob';
+		  		xhr.onload = function(e) {
+					_sounds[id].data = this.response;
+					playSound(id);
+		  		};
+		  		xhr.onerror = function(e) {
+					delete _sounds[id];
+					krpano.trace(3, 'Error ' + e.target.status + ' occurred while receiving the audio file - ' + url + '.');
+		  		};
+		  		// Отправка запроса
+		  		xhr.send();
+			}
+
+		}
+
+		// Функции для работы со свойствами
+		this.set_allowMultuSounds = function(allowMultuSounds) {
+			if (allowMultuSounds) {
+				krpano.trace(2, 'Multisound not support.');
+			}
+			_allowMultuSounds = allowMultuSounds;
+		}
+
+		this.get_allowMultuSounds = function() {
+			return _allowMultuSounds;
+		}
+
+		this.set_volume = function(volume) {
+			_volume = parseFloat(volume);
+			if (_volume < 0) _volume = 0;
+			if (_volume > 100) _volume = 100.0;
+
+			_audio.volume = _volume / 100.0;
+		}
+
+		this.get_volume = function() {
+			return _volume;
+		}
+	} // конец реализации audioHTML5
 };
