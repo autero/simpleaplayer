@@ -1,6 +1,8 @@
 /*
  krpanoJS javascript plugin Simple Audio Player
  Плагин предназначен для воспроизведения звуков.
+ 
+ Павел Горнин, pg@yandex.ru
 
  Использование:
  */
@@ -12,6 +14,18 @@ var krpanoplugin = function() {
 	var krpano = null;
 	// the krpano and plugin interface objects
 	var plugin = null;
+
+	/*
+	 * Список поддерживаемых расширений звуковых файлов, в порядке предпочтения
+	 */
+	var _extension = [];
+
+	/*
+	 * Реализация воспроизведения звуков
+	 * audioAPIImpl - через audio API
+	 *              - через HTML5 элемент <audio>
+	 */
+	var _audioImpl = null;
 
 //	var plugincanvas = null;
 	// optionally - a canvas object for graphic content
@@ -27,25 +41,25 @@ var krpanoplugin = function() {
 
 		krpano.simpleaplayer = pluginobject;
 
+		// say hello
+		krpano.trace(1, "hello from plugin[" + plugin.name + "]");
+
+		local.initialization();
+
 		// Регистрация атрибутов
 		plugin.registerattribute("allowMultuSounds", false, set_allowMultuSounds, get_allowMultuSounds);
-		plugin.registerattribute("volume",           50,    set_volume,           get_volume);
+		plugin.registerattribute("volume",           80,    set_volume,           get_volume);
 
 		// Регистрация методов
 		/* !Важно: регистрируем функции не в плгине (plugin),
 		 * а в объекте krpano, чтобы они были доступны везде
 		 */
-		krpanointerface.playsound = playSound;
+		krpanointerface.playsound     = playSound;
 		krpanointerface.stopallsounds = stopAllSounds;
-		krpanointerface.stopsound = stopSound;
-		krpanointerface.preloadsound = preloadSound;
+		krpanointerface.stopsound     = stopSound;
+		krpanointerface.preloadsound  = preloadSound;
 
-		// say hello
-		krpano.trace(1, "hello from plugin[" + plugin.name + "]");
-
-		local.initialization();
-		// Для показа консоли krpano (только для отладки)
-		krpano.trace(3, 'Дуболь № 33');
+		krpano.trace(3, 'Дуболь №36');
 
 		/*
 		 // add plugin graphic content (optionally)
@@ -80,11 +94,10 @@ var krpanoplugin = function() {
 		plugin = null;
 		krpano = null;
 
-		stopAllSounds();
-		_audioContext = null;
-		_volume = 50;
-		_allowMultuSounds = false;
+		delete _audioImpl;
+		_audioImpl = null;
 	}
+
 	// hittest - test for clicks on the plugin (optionally)
 	// - when the plugin has a graphical irregular shape then it's possible to check here for mouse clicks on it
 	// - the typical usage is to check for a hit on the canvas element
@@ -95,6 +108,7 @@ var krpanoplugin = function() {
 
 		return false;
 	}
+
 	// onresize - the plugin was resized from xml krpano (optionally)
 	// - width,height = the new size for the plugin
 	// - when not defined then only the parent html element will be scaled
@@ -103,8 +117,9 @@ var krpanoplugin = function() {
 
 		return false;
 	}
-	
+
 	local.initialization = function() {
+
 		// Определяем какие звуковые форматы воспроизводит браузер
 		var audio = document.createElement("audio");
 		var result = audio.canPlayType("audio/mpeg");
@@ -129,77 +144,241 @@ var krpanoplugin = function() {
 		// Инициализация звукового движка
 		try {
 			window.AudioContext = window.AudioContext || window.webkitAudioContext;
-			_audioContext = new AudioContext();
+			var audioContext = new AudioContext();
+			_audioImpl = new audioAPIImpl(audioContext, 80, false)
 		} catch(e) {
 			krpano.trace(2, e.message);
 		}
+	}
 
-		if (_audioContext) {
-			krpano.trace(1, 'Создан объект AudioContext из Audio API');
-		} else {
-			krpano.trace(1, 'Браузер не поддерживает Audio API');
+	/*
+	 *  Реализация воспроизведения звука через audio API
+	 *  @param audioContext     - объект AudioContext.
+	 *  @param volume           - уровень громкости (может изменяться в ходе рвботы).
+	 *  @param allowMultuSounds - разрешить воспроизведение нескольких звуков одновременно.
+	 */
+	var audioAPIImpl = function(audioContext, volume, allowMultuSounds) {
+		// private:
+		// Данные относящиеся к воспроизведению звука
+		// Аудио контекст
+		var _audioContext = audioContext;
+		// Уровень громкости [0, 100]
+		var _volume = volume;
+		// Разрешать воспроизведение нескольких звуков однвременно.
+		var _allowMultuSounds = allowMultuSounds;
+		// Массив звуков
+		/*
+		 * [id] // Уникальный идентификатор звука (задается/вычисляется)
+		 *      // Загрузка данных производиться при первом обращении playsound или preloadsound,
+		 * 		// при последующих обращениях загрузка производиться не будет,
+		 *      // а будет использованы те данные которые были получены при первом обращении
+		 *  {
+		 * 		buffer: {},       // Буферр декодированных и готовых к воспроизведению данных
+		 * 		source: {},       // Источник зывука, не равен нулю, когда было запущено воспроизведение
+		 * 		play: true|false, // Флаг, используется для запуска на воспроизведение
+		 *                        // по окончанию асинхронной загрузки данных
+		 *  }
+		 */
+		var _sounds = [];
+		/*
+	 	* Флаг для отслеживания специальных действий для iOS (планшет)
+	 	*/
+		var _audioBufferInitHack = false;
+
+		krpano.trace(1, 'Создан объект AudioContext из Audio API');
+
+		////////////////////////////////////////////////////////////
+		// Интерфейс плагина
+		this.playSound = function(id, src) {
+			krpano.trace(0, "playSound(" + id + ", " + src + ")");
+
+			id = makeId(id);
+
+			if (!_allowMultuSounds)
+				stopAllSounds();
+			else
+				stopSound(id);
+
+			if (!_sounds[id]) {
+				preloadSound(id, src);
+				if (_sounds[id])
+					_sounds[id].play = true;
+			} else {
+		  		if (_sounds[id].buffer) {
+		  			try {
+						var source = _audioContext.createBufferSource();
+						if (!_sounds[id].gain) {
+							_sounds[id].gain = _audioContext.createGain();
+		  					_sounds[id].gain.gain.value = _volume / 100.0;
+		  					_sounds[id].gain.connect(_audioContext.destination);
+		  				}
+						source.connect(_sounds[id].gain);
+						source.buffer = _sounds[id].buffer;
+						_sounds[id].source = source;
+						_sounds[id].source.start(0);
+		  			}
+		  			catch(e) {
+		  				krpano.trace(0, e.message);
+		  			}
+		  		}
+		  		else {
+		  			_sounds[id].play = true;
+		  		}
+		  	}
+
+			return id;
+		}
+
+		this.stopAllSounds = function() {
+			krpano.trace(0, "stopAll");
+
+			for (var iter in _sounds)
+				stopSound(iter);
+		}
+
+		this.stopSound = function(id) {
+			krpano.trace(0, "stopSound(" + id + ")");
+
+			if (_sounds[id]) try {
+				_sounds[id].play = false;
+				if (_sounds[id].source) {
+					_sounds[id].source.stop(0);
+					_sounds[id].source = null;
+				}
+			} catch(e) { krpano.trace(0, e.message); }
+		}
+
+		this.preloadSound = function(id, src) {
+			krpano.trace(0, "preloadSound(" + id + ", " + src + ")");
+
+			id = makeId(id);
+
+			src = src.split("|");
+
+			var url = "";
+			var index = _extension.length + 1;
+
+			for(var i = 0; i < src.length; i++) {
+				var ext = src[i].slice(src[i].lastIndexOf(".") + 1);
+				var ind = _extension.indexOf(ext);
+				if(ind >= 0 && ind < index) {
+					index = ind;
+					url = unescape(krpano.parsePath(src[i]));
+				}
+			}
+
+			if (url == "") {
+				krpano.trace(2, "Форматы не поддерживаеются: " + src);
+				return;
+			}
+
+			if (!_sounds[id]) {
+				// Создаем объект
+				_sounds[id] = {};
+				
+	        	if (!_audioBufferInitHack) {
+	        		// Это важно для iOS - для того что бы все работало необходимо 
+	        		// чтобы в интерфейсном потоке был один раз был создан BufferSource,
+	        		// после этого его можно создавать как угодно.
+	        		var source = _audioContext.createBufferSource();
+	        		source = null;
+	        		_audioBufferInitHack = true;
+	        	}
+	
+				// делаем XMLHttpRequest (AJAX) на сервер
+		  		var xhr = new XMLHttpRequest();
+		  		xhr.open('GET', url, true);
+		  		xhr.responseType = 'arraybuffer'; // важно
+		  		xhr.onload = function(e) {
+		    		// декодируем бинарный ответ
+		    		_audioContext.decodeAudioData(
+		    			this.response,
+		    			function(decodedArrayBuffer) {
+		    				_sounds[id].buffer = decodedArrayBuffer;	    				
+		    				if (_sounds[id].play) try {
+								playSound(id);
+		      				} catch (e) { krpano.trace(3, 'Error: ' + e); }
+		    			},
+		    			function(e) {
+		    				delete sounds[id];
+		      				krpano.trace(3, 'Error decoding file: ' + e);
+		    			}
+		    		);
+		  		};
+		  		xhr.onerror = function(e) {
+					delete sounds[id];
+					krpano.trace(3, 'Error ' + e.target.status + ' occurred while receiving the audio file - ' + url + '.');
+		  		};
+		  		// Отправка запроса
+		  		xhr.send();
+			}
+		}
+
+		// Функции для работы со свойствами
+		this.set_allowMultuSounds = function(allowMultuSounds) {
+			_allowMultuSounds = allowMultuSounds;
+		}
+
+		this.get_allowMultuSounds = function() {
+			return _allowMultuSounds;
+		}
+
+		this.set_volume = function(volume) {
+			_volume = parseFloat(volume);
+			if (_volume < 0) _volume = 0;
+			if (_volume > 100) _volume = 100.0;
+	
+			for (var iter in _sounds) {
+				if (_sounds[iter].gain) {
+					_sounds[iter].gain.gain.value = _volume / 100.0;
+				}
+			}
+		}
+
+		this.get_volume = function() {
+			return _volume;
 		}
 	}
 
-	// Закрытые данные
-	// Данные относящиеся к воспроизведению звука
-	// Аудио контекст
-	var _audioContext = null;
-	// Уровень громкости [0, 100]%
-	var _volume = 50;
-	// Разрешать воспроизведение нескольких звуков однвременно.
-	var _allowMultuSounds = true;
-	// Массив звуков
-	/*
-	 * [id] // Уникальный идентификатор звука (задается/вычисляется)
-	 *      // Загрузка данных производиться при первом обращении playsound или preloadsound,
-	 * 		// при последующих обращениях загрузка производиться не будет,
-	 *      // а будет использованы те данные которые были получены при первом обращении
-	 *  {
-	 * 		buffer: {},       // Буферр декодированных и готовых к воспроизведению данных
-	 * 		source: {},       // Источник зывука, не равен нулю, когда было запущено воспроизведение
-	 * 		play: true|false, // Флаг, используется для запуска на воспроизведение
-	 *                        // по окончанию асинхронной загрузки данных
-	 *  }
-	 */
-	var _sounds = [];
-	/*
-	 * Список поддерживаемых расширений звуковых файлов, в порядке предпочтения
-	 */
-	var _extension = [];
-	/*
-	 * Флаг для отслеживания специальных действий для iOS (планшет)
-	 */
-	var _audioBufferInitHack = false;
-
 	// Функции для работы со свойствами
-	function set_allowMultuSounds(newvalue) {
-		//       krpano.trace(1,"attr4 will be changed from " + attr4 + " to " + newvalue);
-		_allowMultuSounds = newvalue;
+	function set_allowMultuSounds(allowMultuSounds) {
+		try {
+			_audioImpl ?
+				_audioImpl.set_allowMultuSounds(allowMultuSounds) :
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
+		}		
 	}
 
 	function get_allowMultuSounds() {
-		return _allowMultuSounds;
+		try {
+			return _audioImpl ?
+				_audioImpl.get_allowMultuSounds() :
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
+		}
 	}
 
-	function set_volume(newvalue) {
-		krpano.trace(0, "volume will be changed from " + _volume + " to " + newvalue);
-
-		_volume = parseFloat(newvalue);
-		if (_volume < 0) _volume = 0;
-		if (_volume > 100) _volume = 100.0;
-
-		for (var iter in _sounds) {
-			if (_sounds[iter].gain) {
-				_sounds[iter].gain.gain.value = _volume / 100.0;
-			}
+	function set_volume(volume) {
+		try {
+			_audioImpl ?
+				_audioImpl.set_volume(volume) :
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
 		}
 	}
 
 	function get_volume() {
-		krpano.trace(0, "get_volume");
-
-		return _volume;
+		try {
+			return _audioImpl ?
+				_audioImpl.get_volume() :
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
+		}
 	}
 	
 	/*  
@@ -214,131 +393,48 @@ var krpanoplugin = function() {
 	}
 
 	////////////////////////////////////////////////////////////
-	// Интерфейс плагина
+	//
 	function playSound(id, src) {
-		krpano.trace(0, "playSound(" + id + ", " + src + ")");
-
-		id = makeId(id);
-
-		if (!_allowMultuSounds)
-			stopAllSounds();
-		else
-			stopSound(id);
-
-		if (!_sounds[id]) {
-			preloadSound(id, src);
-			if (_sounds[id])
-				_sounds[id].play = true;
-		} else {
-	  		if (_sounds[id].buffer) {
-	  			try {
-					var source = _audioContext.createBufferSource();
-					if (!_sounds[id].gain) {
-						_sounds[id].gain = _audioContext.createGain();
-	  					_sounds[id].gain.gain.value = _volume / 100.0;
-	  					_sounds[id].gain.connect(_audioContext.destination);
-	  				}
-					source.connect(_sounds[id].gain);
-					source.buffer = _sounds[id].buffer;
-					_sounds[id].source = source;
-					_sounds[id].source.start(0);
-	  			}
-	  			catch(e) {
-	  				krpano.trace(0, e.message);
-	  			}
-	  		}
-	  		else {
-	  			_sounds[id].play = true;
-	  		}
-	  	}
-	  	
-		return id;
+		try {
+			if (_audioImpl)
+				return _audioImpl.playSound(id, src)
+			else
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
+		}
 	}
 
 	function stopAllSounds() {
-		krpano.trace(0, "stopAll");
-
-		for (var iter in _sounds)
-			stopSound(iter);
+		try {
+			if (_audioImpl)
+				_audioImpl.stopAllSounds()
+			else
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
+		}
 	}
 
 	function stopSound(id) {
-		krpano.trace(0, "stopSound(" + id + ")");
-
-		if (_sounds[id]) try {
-			_sounds[id].play = false;
-			if (_sounds[id].source) {
-				_sounds[id].source.stop(0);
-				_sounds[id].source.disconnect();
-				_sounds[id].source = null;
-			}
-		} catch(e) { krpano.trace(0, e.message); }
+		try {
+			if (_audioImpl)
+				_audioImpl.stopSound(id)
+			else
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
+		}
 	}
 
 	function preloadSound(id, src) {
-		krpano.trace(0, "preloadSound(" + id + ", " + src + ")");
-
-		id = makeId(id);
-
-		src = src.split("|");
-
-		var url = "";
-		var index = _extension.length + 1;
-
-		for(var i = 0; i < src.length; i++) {
-			var ext = src[i].slice(src[i].lastIndexOf(".") + 1);
-			var ind = _extension.indexOf(ext);
-			if(ind >= 0 && ind < index) {
-				index = ind;
-				url = unescape(krpano.parsePath(src[i]));
-			}
-		}
-
-		if (url == "") {
-			krpano.trace(2, "Форматы не поддерживаеются: " + src);
-			return;
-		}
-
-		if (!_sounds[id]) {
-			// Создаем объект
-			_sounds[id] = {};
-			
-        	if (!_audioBufferInitHack) {
-        		// Это важно для iOS - для того что бы все работало необходимо 
-        		// чтобы в интерфейсном потоке был один раз был создан BufferSource,
-        		// после этого его можно создавать как угодно.
-        		var source = _audioContext.createBufferSource();
-        		source = null;
-        		_audioBufferInitHack = true;
-        	}
-
-			// делаем XMLHttpRequest (AJAX) на сервер
-	  		var xhr = new XMLHttpRequest();
-	  		xhr.open('GET', url, true);
-	  		xhr.responseType = 'arraybuffer'; // важно
-	  		xhr.onload = function(e) {
-	    		// декодируем бинарный ответ
-	    		_audioContext.decodeAudioData(
-	    			this.response,
-	    			function(decodedArrayBuffer) {
-	    				_sounds[id].buffer = decodedArrayBuffer;	    				
-	    				if (_sounds[id].play) try {
-							playSound(id);
-	      				} catch (e) { krpano.trace(3, 'Error: ' + e); }
-	    			},
-	    			function(e) {
-	    				delete _sounds[id];
-	      				krpano.trace(3, 'Error decoding file: ' + e);
-	    			}
-	    		);
-	  		};
-	  		xhr.onerror = function(e) {
-				delete _sounds[id];
-				krpano.trace(3, 'Error ' + e.target.status + ' occurred while receiving the audio file - ' + url + '.');
-	  		};
-
-	  		// Отправка запроса
-	  		xhr.send();
+		try {
+			if (_audioImpl)
+				_audioImpl.preloadSound(id, src)
+			else
+				krpano.trace(2, "_audioImpl == null");
+		} catch(e) {
+			krpano.trace(2, e.message);
 		}
 	}
-}; 
+};
