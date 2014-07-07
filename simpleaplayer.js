@@ -2,7 +2,7 @@
  krpanoJS javascript plugin Simple Audio Player
  Плагин предназначен для воспроизведения звуков.
  
- Павел Горнин, pg@yandex.ru
+ @author Павел Горин (pg@yandex.ru)
 
  Использование:
  */
