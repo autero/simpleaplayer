@@ -2,7 +2,7 @@
  krpanoJS javascript plugin Simple Audio Player
  Плагин предназначен для воспроизведения звуков.
  
- @author Павел Горин (pg@yandex.ru)
+ @author Pavel Gorin (pg@yandex.ru)
 
  Использование:
  */
@@ -19,6 +19,11 @@ var krpanoplugin = function() {
 	 * Список поддерживаемых расширений звуковых файлов, в порядке предпочтения
 	 */
 	var _extension = [];
+
+	// Уровень громкости [0, 100]
+	var _volume = 80;
+	// Разрешать воспроизведение нескольких звуков однвременно.
+	var _allowMultuSounds = false;
 
 	/*
 	 * Реализация воспроизведения звуков
@@ -42,7 +47,7 @@ var krpanoplugin = function() {
 		krpano.simpleaplayer = pluginobject;
 
 		// say hello
-		krpano.trace(3, "4444 hello from plugin[" + plugin.name + "]");
+//		krpano.trace(3, "hello from plugin[" + plugin.name + "]");
 
 		local.initialization();
 
@@ -154,14 +159,14 @@ var krpanoplugin = function() {
 		try {
 			window.AudioContext = window.AudioContext || window.webkitAudioContext;
 			var audioContext = new AudioContext();
-			_audioImpl = new audioAPIImpl(audioContext, 80, false);
+			_audioImpl = new audioAPIImpl(audioContext, _volume, _allowMultuSounds);
 			audio = null;
 		} catch(e) {
 //			krpano.trace(2, e.message);
 		}
 
 		if (!_audioImpl)
-			_audioImpl = new audioHTML5(audio, 80, false);
+			_audioImpl = new audioHTML5(audio, _volume, _allowMultuSounds);
 	}
 
 	/*  
@@ -186,33 +191,28 @@ var krpanoplugin = function() {
 	}
 
 	function get_allowMultuSounds() {
-		try {
-			return _audioImpl ?
-				_audioImpl.get_allowMultuSounds() :
-				krpano.trace(2, "_audioImpl == null");
-		} catch(e) {
-			krpano.trace(2, e.message);
-		}
+		return _allowMultuSounds;
 	}
 
 	function set_volume(volume) {
 		try {
-			_audioImpl ?
-				_audioImpl.set_volume(volume) :
-				krpano.trace(2, "_audioImpl == null");
+			volume = parseFloat(volume);
+			if (volume < 0) volume = 0;
+			if (volume > 100) volume = 100.0;
+			
+			if (_volume != volume) {
+				_volume = volume;
+				_audioImpl ?
+					_audioImpl.set_volume(_volume) :
+					krpano.trace(2, "_audioImpl == null");
+			}
 		} catch(e) {
 			krpano.trace(2, e.message);
 		}
 	}
 
 	function get_volume() {
-		try {
-			return _audioImpl ?
-				_audioImpl.get_volume() :
-				krpano.trace(2, "_audioImpl == null");
-		} catch(e) {
-			krpano.trace(2, e.message);
-		}
+		return _volume;
 	}
 
 	function playSound(id, src) {
@@ -270,10 +270,6 @@ var krpanoplugin = function() {
 		// Данные относящиеся к воспроизведению звука
 		// Аудио контекст
 		var _audioContext = audioContext;
-		// Уровень громкости [0, 100]
-		var _volume = volume;
-		// Разрешать воспроизведение нескольких звуков однвременно.
-		var _allowMultuSounds = allowMultuSounds;
 		// Массив звуков
 		/*
 		 * [id] // Уникальный идентификатор звука (задается/вычисляется)
@@ -427,24 +423,12 @@ var krpanoplugin = function() {
 			_allowMultuSounds = allowMultuSounds;
 		}
 
-		this.get_allowMultuSounds = function() {
-			return _allowMultuSounds;
-		}
-
-		this.set_volume = function(volume) {
-			_volume = parseFloat(volume);
-			if (_volume < 0) _volume = 0;
-			if (_volume > 100) _volume = 100.0;
-	
+		this.set_volume = function(volume) {	
 			for (var iter in _sounds) {
 				if (_sounds[iter].gain) {
 					_sounds[iter].gain.gain.value = _volume / 100.0;
 				}
 			}
-		}
-
-		this.get_volume = function() {
-			return _volume;
 		}
 	} // конец реализации audioAPIImpl
 
@@ -459,10 +443,6 @@ var krpanoplugin = function() {
 		// Данные относящиеся к воспроизведению звука
 		// Элемент HTML5 audio, через который все будет воспроизводиться
 		var _audio = audio;
-		// Уровень громкости [0, 100]
-		var _volume = volume;
-		// Разрешать воспроизведение нескольких звуков однвременно.
-		var _allowMultuSounds = allowMultuSounds;
 		// Массив звуков
 		/*
 		 * [id] // Уникальный идентификатор звука (задается/вычисляется)
@@ -596,20 +576,8 @@ var krpanoplugin = function() {
 			_allowMultuSounds = allowMultuSounds;
 		}
 
-		this.get_allowMultuSounds = function() {
-			return _allowMultuSounds;
-		}
-
 		this.set_volume = function(volume) {
-			_volume = parseFloat(volume);
-			if (_volume < 0) _volume = 0;
-			if (_volume > 100) _volume = 100.0;
-
 			_audio.volume = _volume / 100.0;
-		}
-
-		this.get_volume = function() {
-			return _volume;
 		}
 	} // конец реализации audioHTML5
 };
